@@ -21,12 +21,18 @@ import shlex
 import shutil
 import sys
 import textwrap
+#oplus add remote cache rc
+import urllib.request
+#end
 from typing import Tuple, Optional
 
 _BAZEL_REL_PATH = "prebuilts/bazel/linux-x86_64/bazel"
 _BAZEL_JDK_REL_PATH = "prebuilts/jdk/jdk11/linux-x86"
 _BAZEL_RC_NAME = "build/kernel/kleaf/common.bazelrc"
 _BAZEL_RC_DIR = "build/kernel/kleaf/bazelrc"
+#oplus add remote cache rc
+_BAZEL_RC_OPLUS_REMOTE_CACHE = "build/kernel/kleaf/bazelrc/oplus_rbe.bazelrc"
+#end
 _FLAGS_BAZEL_RC = "build/kernel/kleaf/bazelrc/flags.bazelrc"
 
 _FLAG_PATTERN = re.compile(
@@ -40,6 +46,31 @@ _FLAG_COMMENT_PATTERN = re.compile(
 _CONFIG_PATTERN = re.compile(
     r"^--config=(?P<config>[a-z_]+):\s*(?P<description>.*)$"
 )
+
+
+#oplus add remote cache rc config when special env value is set
+def _check_bazel_server_status(url):
+      try:
+        response = urllib.request.urlopen(url)
+        if response.getcode() == 200:
+            return True
+        else:
+            return False
+      except urllib.error.URLError:
+        return False
+
+def _try_add_remote_cache_args(final_args,root_dir):
+        oplus_is_cache_build = os.environ.get("OPLUS_USE_JFROG_CACHE")
+        oplus_is_bb_build = os.environ.get("OPLUS_USE_BUILDBUDDY_REMOTE_BUILD")
+        if oplus_is_cache_build == "true" or oplus_is_bb_build == "true":
+            oplus_remote_cache_url="http://bazel-remote-cache.myoas.com:8083/status"
+            if _check_bazel_server_status(oplus_remote_cache_url):
+                final_args += [
+                    f"--bazelrc={root_dir}/{_BAZEL_RC_OPLUS_REMOTE_CACHE}",
+                ]
+        return final_args
+    #end
+
 
 
 def _require_absolute_path(p: str) -> pathlib.Path:
@@ -303,12 +334,14 @@ class BazelWrapper(object):
 
         bazel_jdk_path = f"{self.root_dir}/{_BAZEL_JDK_REL_PATH}"
         final_args = [self.bazel_path] + self.transformed_startup_options
-
         if not self.known_startup_options.help:
             final_args += [
                 f"--server_javabase={bazel_jdk_path}",
                 f"--bazelrc={self.root_dir}/{_BAZEL_RC_NAME}",
             ]
+        #oplus add remote cache rc config when special env value is set
+        final_args = _try_add_remote_cache_args(final_args,self.root_dir)
+        #end
         if self.command is not None:
             final_args.append(self.command)
         final_args += self.transformed_command_args

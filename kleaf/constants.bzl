@@ -146,3 +146,9 @@ LTO_VALUES = (
     "full",
     "fast",
 )
+
+PGO_VALUES = (
+    "none",
+    "pgo",
+    "inst",
+)

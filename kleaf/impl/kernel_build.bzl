@@ -308,14 +308,6 @@ def kernel_build(
           `system_trusted_key`. A relative path is written instead and the file
           is restored to that relative path under `$OUT_DIR`.
 
-          Requires patch "module: allow UNUSED_KSYMS_WHITELIST to be relative
-          against objtree.". See these links for backports:
-
-          * android14-5.15: http://r.android.com/3101435
-          * android14-6.1: http://r.android.com/3101434
-
-          This is true and not modifiable on main-kernel-build-2024
-          (android15-6.6) and above.
         kmi_symbol_list: A label referring to the main KMI symbol list file. See `additional_kmi_symbol_lists`.
 
           This is the Bazel equivalent of `ADDITIONAL_KMI_SYMBOL_LISTS`.
@@ -415,12 +407,6 @@ def kernel_build(
           (e.g. `kasan_defconfig`) or `<prop>_<value>_defconfig` (e.g. `lto_none_defconfig`)
           to provide human-readable hints during the build. The prefix should
           describe what the defconfig does. However, this is not a requirement.
-
-          **NOTE**: `defconfig_fragments` are applied **after** `make defconfig`, similar
-          to `POST_DEFCONFIG_CMDS`. If you migrate from `PRE_DEFCONFIG_CMDS`
-          to `defconfig_fragments`, certain values may change; double check
-          by building the `<target_name>_config` target and examining the
-          generated `.config` file.
         page_size: Default is `"default"`. Page size of the kernel build.
 
           Value may be one of `"default"`, `"4k"`, `"16k"` or `"64k"`. If
@@ -1114,7 +1100,7 @@ def _get_grab_gcno_step(ctx):
     tools = []
     gcno_mapping = None
     gcno_dir = None
-    if ctx.attr._gcov[BuildSettingInfo].value:
+    if ctx.attr._gcov[BuildSettingInfo].value or ctx.attr._kocov[BuildSettingInfo].value:
         gcno_dir = ctx.actions.declare_directory("{name}/{name}_gcno".format(name = ctx.label.name))
         gcno_mapping = ctx.actions.declare_file("{name}/gcno_mapping.{name}.json".format(name = ctx.label.name))
         gcno_archive = ctx.actions.declare_file(
@@ -1426,11 +1412,25 @@ def _build_main_action(
         restore_out_dir_cmd = cache_dir_step.cmd,
     )
 
+    pgo_mkflags = []
+    pgo_flag = ctx.attr._pgo[BuildSettingInfo].value
+    if pgo_flag == "inst":
+        pgo_mkflags += [
+            "-fprofile-generate",
+        ]
+    elif pgo_flag == "pgo":
+        pgo_mkflags += [
+            "-fprofile-use=${ROOT_DIR}/${KERNEL_DIR}/pgo-profiles/vmlinux_v1.profdata",
+            "-Wno-backend-plugin",
+            "-Wno-profile-instr-unprofiled",
+            "-Wno-profile-instr-out-of-date",
+        ]
+
     make_goals = ctx.attr.config[KernelEnvMakeGoalsInfo].make_goals
     command += """
            {kbuild_mixed_tree_cmd}
          # Actual kernel build
-           {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} {make_goals}
+           {interceptor_command_prefix} make -C ${{KERNEL_DIR}} ${{TOOL_ARGS}} O=${{OUT_DIR}} KCFLAGS_PGO="{pgo_mkflags}" {make_goals}
          # Install modules
            {modinst_cmd}
          # Archive headers in OUT_DIR
@@ -1495,6 +1495,7 @@ def _build_main_action(
         interceptor_command_prefix = interceptor_step.command_prefix,
         label = ctx.label,
         make_goals = " ".join(make_goals),
+        pgo_mkflags = " ".join(pgo_mkflags),
         copy_module_symvers_cmd = copy_module_symvers_step.cmd,
     )
 
@@ -2103,6 +2104,12 @@ def _kmi_symbol_list_strict_mode(ctx, all_output_files, all_module_names_file):
               IGNORED because --kcsan is set!".format(this_label = ctx.label))
         return None
 
+    if ctx.attr._kocov[BuildSettingInfo].value:
+        # buildifier: disable=print
+        print("\nWARNING: {this_label}: Attribute kmi_symbol_list_strict_mode\
+              IGNORED because --kocov is set!".format(this_label = ctx.label))
+        return None
+
     # Skip for the --kgdb targets as they are not valid GKI release targets
     if ctx.attr._kgdb[BuildSettingInfo].value:
         # buildifier: disable=print
@@ -2207,6 +2214,9 @@ def _kmi_symbol_list_violations_check(ctx, modules_staging_archive):
     # and can disable the runtime symbol protection with CONFIG_SIG_PROTECT=n
     # if required.
     if ctx.attr._kcsan[BuildSettingInfo].value:
+        return None
+
+    if ctx.attr._kocov[BuildSettingInfo].value:
         return None
 
     # Skip for the --kgdb targets as they are not valid GKI release targets

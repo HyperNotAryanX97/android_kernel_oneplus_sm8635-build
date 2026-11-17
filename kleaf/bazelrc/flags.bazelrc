@@ -32,6 +32,7 @@ build --flag_alias=user_kmi_symbol_lists=//build/kernel/kleaf:user_kmi_symbol_li
 
 # flags that control binary features
 build --flag_alias=gcov=//build/kernel/kleaf:gcov
+build --flag_alias=kocov=//build/kernel/kleaf:kocov
 build --flag_alias=kasan=//build/kernel/kleaf:kasan
 build --flag_alias=kasan_sw_tags=//build/kernel/kleaf:kasan_sw_tags
 build --flag_alias=kcsan=//build/kernel/kleaf:kcsan
@@ -40,6 +41,7 @@ build --flag_alias=notrim=//build/kernel/kleaf/impl:force_disable_trim
 build --flag_alias=btf_debug_info=//build/kernel/kleaf:btf_debug_info
 build --flag_alias=noset_ext_modules=no//build/kernel/kleaf:set_ext_modules
 build --flag_alias=gki_build_config_fragment=//build/kernel/kleaf:gki_build_config_fragment
+build --flag_alias=pgo=//build/kernel/kleaf:pgo
 build --flag_alias=defconfig_fragment=//build/kernel/kleaf:defconfig_fragment
 build --flag_alias=page_size=//build/kernel/kleaf:page_size
 

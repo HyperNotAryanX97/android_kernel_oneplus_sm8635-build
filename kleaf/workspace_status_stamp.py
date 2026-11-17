@@ -96,8 +96,8 @@ def get_localversion_from_script(bin: pathlib.Path | None, project: pathlib.Path
                                  env=env)
 
         suffix = None
-        if os.environ.get("BUILD_NUMBER"):
-            suffix = "-ab" + os.environ["BUILD_NUMBER"]
+        #if os.environ.get("BUILD_NUMBER"):
+        #    suffix = "-ab" + os.environ["BUILD_NUMBER"]
         return LocalversionResult(
             path=project,
             popen=popen,
@@ -139,8 +139,8 @@ def get_localversion_from_git(project: pathlib.Path) -> PathCollectible | None:
     popen = subprocess.Popen(script, shell=True, text=True,
                              stdout=subprocess.PIPE, cwd=project)
     suffix = None
-    if os.environ.get("BUILD_NUMBER"):
-        suffix = "-ab" + os.environ["BUILD_NUMBER"]
+    #if os.environ.get("BUILD_NUMBER"):
+    #    suffix = "-ab" + os.environ["BUILD_NUMBER"]
     return LocalversionResult(
         path=project,
         popen=popen,
@@ -160,7 +160,15 @@ def list_projects() -> list[pathlib.Path]:
             return parse_repo_manifest(repo_prop_file.read())
 
     try:
-        output = subprocess.check_output(["repo", "list", "-f"], text=True)
+        #oplus change this to fix bug when run this under 'env -i', try project.list when .repo does not exist
+        #output = subprocess.check_output(["repo", "list", "-f"], text=True)
+        output = subprocess.check_output(["bash","-c",
+         "if [[ -e ../.repo ]];then" +
+         "  PATH=/usr/bin /bin/repo list -f;" +
+         "else " +
+         "  sed \"s#^#$TOP_DIR#\" ../project.list;" +
+         "fi"], text=True)
+        #end
         return parse_repo_list(output)
     except (subprocess.SubprocessError, FileNotFoundError) as e:
         logging.warning("Unable to execute repo list -f: %s", e)

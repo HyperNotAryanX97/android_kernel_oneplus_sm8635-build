@@ -69,6 +69,11 @@ def _super_image_impl(ctx):
         tools = depset(tools, transitive = transitive_tools),
         progress_message = "Building super image %s" % ctx.attr.name,
         command = command,
+        #oplus add to set tar cmds local only,(as realpath is used)
+        execution_requirements = {
+            "no-remote": "1",
+        },
+        #end
     )
 
     return [
@@ -100,6 +105,11 @@ def _unsparsed_image_impl(ctx):
         tools = hermetic_tools.deps,
         progress_message = "Building unsparsed image %s" % ctx.attr.name,
         command = command,
+        #oplus add to set tar cmds local only,(as realpath is used)
+        execution_requirements = {
+            "no-remote": "1",
+        },
+        #end
     )
 
     return [
@@ -126,7 +136,7 @@ When included in a `copy_to_dist_dir` rule, this rule copies a `super.img` to `D
             doc = "`vendor_dlkm_image` to include in super.img",
         ),
         "super_img_size": attr.int(
-            default = 0x10000000,
+            default = 0x40000000,
             doc = "Size of super.img",
         ),
         "out": attr.string(

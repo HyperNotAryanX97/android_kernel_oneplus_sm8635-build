@@ -169,6 +169,11 @@ EOF
         command = command,
         mnemonic = "HermeticToolsTar",
         progress_message = "Creating wrapper for tar: {}".format(ctx.label),
+        #oplus add to set tar cmds local only,(as realpath is used)
+        execution_requirements = {
+            "no-remote": "1",
+        },
+        #end
     )
 
 def _handle_rsync(ctx, out, hermetic_base, deps):

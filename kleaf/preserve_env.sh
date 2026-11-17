@@ -26,5 +26,8 @@ sed=/bin/sed
 ( export -p; export -f ) | \
   # Remove the reference to PWD itself
   $sed '/^declare -x PWD=/d' | \
+  #oplus add this to remove TMPDIR
+  $sed '/^declare -x TMPDIR=/d' | \
+  #end
   # Now ensure, new new PWD gets expanded
   $sed "s|${PWD}|\$PWD|g"

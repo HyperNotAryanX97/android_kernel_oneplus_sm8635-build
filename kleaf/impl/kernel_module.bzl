@@ -27,6 +27,7 @@ load(
 load(":cache_dir.bzl", "cache_dir")
 load(
     ":common_providers.bzl",
+    "GcovInfo",
     "DdkConfigInfo",
     "DdkSubmoduleInfo",
     "KernelBuildExtModuleInfo",
@@ -243,6 +244,64 @@ def _get_implicit_outs(ctx):
 
     return list(implicit_outs_to_srcs.keys())
 
+def _get_grab_gcno_step(ctx, src_dir):
+    """Returns a step for grabbing the `*.gcno`files from `src_dir`.
+
+    Args:
+        ctx: Context from the rule.
+        src_dir: Source directory.
+
+    Returns:
+      A struct with fields (inputs, tools, outputs, cmd, gcno_mapping, gcno_dir)
+    """
+    grab_gcno_cmd = ""
+    inputs = []
+    outputs = []
+    tools = []
+    gcno_mapping = None
+    gcno_dir = None
+
+    if ctx.attr._kocov[BuildSettingInfo].value:
+        gcno_dir = ctx.actions.declare_directory("{name}/{name}_gcno".format(name = ctx.label.name))
+        gcno_mapping = ctx.actions.declare_file("{name}/gcno_mapping.{name}.json".format(name = ctx.label.name))
+        gcno_archive = ctx.actions.declare_file(
+            "{name}/{name}.gcno.tar.gz".format(name = ctx.label.name),
+        )
+        outputs += [gcno_dir, gcno_mapping, gcno_archive]
+        tools.append(ctx.executable._print_gcno_mapping)
+
+        extra_args = ""
+        base_kernel_gcno_dir_cmd = ""
+
+        # Note: Emitting ${OUT_DIR} is one source of ir-reproducible output for sandbox actions.
+        # However, note that these ir-reproducibility are tied to vmlinux, because these paths are already
+        # embedded in vmlinux. This file just makes such ir-reproducibility more explicit.
+        grab_gcno_cmd = """
+            rsync -a --prune-empty-dirs --include '*/' --include '*.gcno' --exclude '*' {src_dir}/ {gcno_dir}/
+            touch {gcno_mapping}
+            {print_gcno_mapping} {extra_args} {src_dir}:{gcno_dir} > {gcno_mapping}
+            # Archive gcno_dir + gcno_mapping + base_kernel_gcno_dir
+            {base_kernel_gcno_cmd}
+            cp {gcno_mapping} {gcno_dir}
+            tar czf {gcno_archive} -C {gcno_dir} .
+        """.format(
+            src_dir = src_dir,
+            gcno_dir = gcno_dir.path,
+            gcno_mapping = gcno_mapping.path,
+            print_gcno_mapping = ctx.executable._print_gcno_mapping.path,
+            extra_args = extra_args,
+            gcno_archive = gcno_archive.path,
+            base_kernel_gcno_cmd = base_kernel_gcno_dir_cmd,
+        )
+    return struct(
+        inputs = inputs,
+        tools = tools,
+        cmd = grab_gcno_cmd,
+        outputs = outputs,
+        gcno_mapping = gcno_mapping,
+        gcno_dir = gcno_dir,
+    )
+
 def _kernel_module_impl(ctx):
     split_deps = kernel_utils.split_kernel_module_deps(ctx.attr.deps, ctx.label)
     kernel_module_deps = split_deps.kernel_modules
@@ -390,6 +449,16 @@ def _kernel_module_impl(ctx):
             modules_staging_dir = modules_staging_dws.directory.path,
         )
 
+    grab_gcno_step = _get_grab_gcno_step(ctx, "${OUT_DIR}/${ext_mod_rel}")
+    inputs += grab_gcno_step.inputs
+    command_outputs += grab_gcno_step.outputs
+    tools += grab_gcno_step.tools
+
+    gcov_info = GcovInfo(
+        gcno_mapping = grab_gcno_step.gcno_mapping,
+        gcno_dir = grab_gcno_step.gcno_dir,
+    )
+
     grab_cmd_step = get_grab_cmd_step(ctx, "${OUT_DIR}/${ext_mod_rel}")
     inputs += grab_cmd_step.inputs
     command_outputs += grab_cmd_step.outputs
@@ -467,6 +536,8 @@ def _kernel_module_impl(ctx):
 
              # Grab unstripped modules
                {grab_unstripped_cmd}
+             # Grab *.gcno files
+               {grab_gcno_step_cmd}
              # Grab *.cmd
                {grab_cmd_cmd}
              # Move Module.symvers
@@ -491,6 +562,7 @@ def _kernel_module_impl(ctx):
         check_no_remaining = check_no_remaining.path,
         grab_modules_order_cmd = grab_modules_order_cmd,
         drop_modules_order_cmd = drop_modules_order_cmd,
+        grab_gcno_step_cmd = grab_gcno_step.cmd,
         grab_cmd_cmd = grab_cmd_step.cmd,
     )
 
@@ -599,6 +671,9 @@ def _kernel_module_impl(ctx):
     else:
         ddk_config_info = DdkConfigInfo(kconfig = depset(), defconfig = depset())
 
+    default_info_files = []
+    default_info_files.extend(output_files)
+    default_info_files.extend(grab_gcno_step.outputs)
     # Only declare outputs in the "outs" list. For additional outputs that this rule created,
     # the label is available, but this rule doesn't explicitly return it in the info.
     # Also add check_no_remaining in the list of default outputs so that, when
@@ -607,9 +682,9 @@ def _kernel_module_impl(ctx):
     return [
         # Sync list of infos with kernel_module_group.
         DefaultInfo(
-            files = depset(output_files + [check_no_remaining, module_symvers]),
+            files = depset(default_info_files + [check_no_remaining, module_symvers]),
             # For kernel_module_test
-            runfiles = ctx.runfiles(files = output_files),
+            runfiles = ctx.runfiles(files = default_info_files),
         ),
         KernelModuleSetupInfo(
             inputs = depset([module_symvers]),
@@ -634,6 +709,7 @@ def _kernel_module_impl(ctx):
             # It is needed to remove the `target_name` because we declare_file({name}/{internal_module_symvers_name}) above.
             restore_paths = depset([module_symvers_restore_path]),
         ),
+        gcov_info,
         ddk_headers_info,
         ddk_config_info,
         KernelCmdsInfo(
@@ -673,6 +749,12 @@ _kernel_module = rule(
         "kernel_build": attr.label(
             mandatory = True,
             providers = [KernelBuildExtModuleInfo],
+        ),
+        "_kocov": attr.label(default = "//build/kernel/kleaf:kocov"),
+        "_print_gcno_mapping": attr.label(
+            default = Label("//build/kernel/kleaf/impl:print_gcno_mapping"),
+            cfg = "exec",
+            executable = True,
         ),
         "deps": attr.label_list(),
         # Not output_list because it is not a list of labels. The list of
